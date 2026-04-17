@@ -64,6 +64,8 @@ X_val, X_test, y_val, y_test     = train_test_split(X_temp, y_temp, test_size=0.
 
 For MNIST the classes are already roughly balanced (~10% each), so stratification has a small but measurable effect. The bar chart of class distributions verifies this visually — the three plots should look nearly identical.
 
+The example of "more 1s and fewer 5s" is deliberate, not arbitrary — 1 is the most frequent class in MNIST (7,877 samples, 11.25%) and 5 is the least frequent (6,313 samples, 9.02%), as shown in the printed class distribution output. These are the two classes most likely to be over/under-represented in a random unstratified split.
+
 ### Class distribution bar chart
 ```python
 fig, axes = plt.subplots(1, 3, figsize=(14, 4))
@@ -366,6 +368,117 @@ for ax, (title, degree, seed) in zip(axes, configs):
 - **degree=1**: a noisy linear band with positive slope (all $a_k > 0$)
 - **degree=2**: a noisy upward-opening parabola
 - **degree=3**: a noisy S-curve, more complex — the cubic term dominates at the edges
+
+---
+
+## 2.2 SVR with Different Kernels
+
+### What SVR is
+Support Vector Regression (SVR) finds a function that fits within an ε-tube around the training data while minimising model complexity. Points outside the tube become "support vectors" and determine the shape of the fit. The kernel controls how the input space is transformed before fitting.
+
+### Why `make_pipeline(StandardScaler(), SVR(...))`?
+SVR is sensitive to input scale — the ε-tube and the kernel distances are all computed in feature space, so a feature with values in [0, 1000] would dominate over one in [0, 1]. `StandardScaler` standardises each feature to zero mean and unit variance before SVR sees it. Wrapping in `make_pipeline` ensures the scaler is fit only on training data and applied consistently to any new data, preventing leakage.
+
+### The three kernels
+
+| Kernel | What it does | Good for |
+|---|---|---|
+| `linear` | Fits a straight line (or hyperplane in higher dimensions) | Data with a linear relationship |
+| `poly` | Maps features into a polynomial feature space (default `degree=3`) | Polynomial relationships; can fit curves |
+| `rbf` | Radial Basis Function — a Gaussian similarity kernel; very flexible | Non-linear data; general-purpose |
+
+### The plot grid
+The 3×3 subplot grid has **datasets as rows** (linear, quadratic, cubic) and **kernels as columns** (linear, poly, rbf). Each subplot shows:
+- **Blue scatter**: training data — what the model learned from
+- **Orange scatter**: test data — held-out points used only for R²
+- **Red curve**: `svr.predict(x_grid)` — the fitted function evaluated on 300 evenly-spaced x values from -3 to 3
+
+`x_grid = np.linspace(-3, 3, 300).reshape(-1, 1)` creates the smooth x range for the curve. Reshaping to `(-1, 1)` makes it 2D so sklearn's predict accepts it.
+
+`svr_models[(name, kernel)] = svr` stores each fitted pipeline in a dict keyed by (dataset name, kernel) so we can query R² again when building the summary table, without refitting.
+
+### R² score
+`svr.score(X_te, y_te)` returns the coefficient of determination R²:
+```
+R² = 1 - SS_res / SS_tot
+```
+- **R² = 1.0**: perfect fit — model explains all variance
+- **R² = 0.0**: model performs no better than predicting the mean
+- **R² < 0**: model performs worse than predicting the mean (bad fit)
+
+### Expected results by combination
+
+| Dataset | linear kernel | poly kernel | rbf kernel |
+|---|---|---|---|
+| Linear | High R² — linear data suits a linear model | Should also fit well (degree-3 poly includes degree-1) | High R² — RBF is flexible enough |
+| Quadratic | Lower R² — linear model cannot capture the curve | Good fit — degree-3 poly includes quadratic terms | High R² |
+| Cubic | Low R² — linear model will badly underfit | Good fit — degree-3 matches the data exactly | High R² — but may be slightly over-smoothed |
+
+The key takeaway: the **linear kernel underfits non-linear datasets** because it can only express straight lines. The **poly kernel** performs well when its degree matches or exceeds the data's degree. The **rbf kernel** is the most robust across all three — its Gaussian similarity can approximate any smooth function given enough support vectors.
+
+---
+
+## 2.3 Hyperparameter Tuning via Grid Search
+
+### Why grid search with cross-validation?
+When you evaluate on the test set to pick the best hyperparameters, you're effectively training on it — the test set would no longer be "unseen". Cross-validation solves this: the training set is split into 5 folds, the model is trained on 4 and evaluated on the held-out 1, rotated 5 times. The CV score is the average across all 5 held-out folds — an honest estimate of generalisation without touching the test set.
+
+### Hyperparameter choices
+
+| Param | Values | Why these values |
+|---|---|---|
+| `kernel` | `poly`, `rbf` | The two kernels that handle non-linear data — linear was shown to underfit cubic data in 2.2 |
+| `C` | `1`, `100` | C controls how hard the model tries to fit training points outside the ε-tube. Low C = smoother/more regularised; high C = tighter fit but risk of overfitting |
+| `epsilon` | `0.1`, `0.5` | Defines the tube width where no loss is incurred. Small ε = tries to fit more points closely; large ε = allows more slack and produces a smoother function |
+
+2 × 2 × 2 = **8 combinations**, × 5 folds = **40 models fitted total**.
+
+### Pipeline parameter naming
+Because the SVR is inside a `make_pipeline`, sklearn prefixes parameters with the step name. `make_pipeline(StandardScaler(), SVR())` names the SVR step `svr` automatically (lowercase class name). So in `param_grid`, the keys are `svr__kernel`, `svr__C`, `svr__epsilon` — double underscore separates step name from parameter name.
+
+### `GridSearchCV` setup
+```python
+grid_search = GridSearchCV(
+    pipe, param_grid,
+    cv=kf, scoring='r2',
+    refit=True, n_jobs=-1,
+)
+```
+- `cv=kf` — uses our `KFold(n_splits=5, shuffle=True, random_state=42)` for reproducible splits (same pattern as lab-03-sol)
+- `scoring='r2'` — optimises for R² (higher = better); appropriate for regression
+- `refit=True` — after finding best params, automatically refit on the **entire** training set; `grid_search.best_estimator_` is then ready to use directly
+- `n_jobs=-1` — use all CPU cores to fit folds in parallel
+
+### Results table via pandas
+```python
+pd.DataFrame(grid_search.cv_results_)[cols].sort_values('rank')
+```
+`cv_results_` is a dict with one entry per combination. The most useful columns are:
+- `mean_test_score` — average R² across all 5 folds (the score used to rank)
+- `std_test_score` — standard deviation across folds; low std = stable/reliable result
+- `rank_test_score` — rank 1 = best combination
+
+---
+
+## 2.4 Optimal Model Evaluation
+
+### What `best_estimator_` is
+`grid_search.best_estimator_` is the pipeline (StandardScaler + SVR) already refitted on the **full training set** using the best hyperparameters. It's ready to call `.predict()` and `.score()` on — no extra steps needed.
+
+### Comparing CV score vs test score
+```python
+print(f'CV R² (train):  {grid_search.best_score_:.4f}')
+print(f'Test R²:        {test_r2:.4f}')
+```
+- If CV R² ≈ test R²: the cross-validation estimate was accurate; the model generalises well
+- If test R² is noticeably lower: slight optimism bias — the CV folds happened to be slightly easier than the test set
+- If test R² is noticeably higher: unusual; could be a lucky test split
+
+### The evaluation plot
+The plot shows the fitted curve against both training and test scatter on the cubic dataset. What to look for:
+- Does the red curve follow the overall polynomial trend, or is it too flat (underfitting) / too wiggly (overfitting)?
+- Are the orange test points (never seen during training) close to the curve?
+- A good SVR fit on a cubic dataset should trace a smooth S-curve through the noisy scatter
 
 ---
 
