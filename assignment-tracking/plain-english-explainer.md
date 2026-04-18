@@ -321,3 +321,57 @@ A good result is when the CV R² (from training) and test R² are close to each 
 | **Cross-validation** | Training/evaluating multiple times on different splits for a reliable score |
 | **Stratification** | Ensuring each data split has the same class proportions |
 | **Pipeline** | Bundling preprocessing (scaling) and the model into one reusable object |
+
+---
+
+## Issues Found Against Assignment Requirements
+
+Last checked: 2026-04-18
+
+### 🔴 Critical — Will break or lose marks
+
+**1. Heatmap cell uses `y_train` before the split is defined**
+
+The heatmap cell (the one that plots average pixel intensity per digit class) appears in the notebook *before* the train/test split cell that defines `y_train`. Running the notebook top-to-bottom will crash with a `NameError: name 'y_train' is not defined`. Either move the heatmap cell to after the split, or swap it for a version that uses the full `y` array instead.
+
+**2. Three major commentary sections are still placeholder text**
+
+The assignment says "treat your submission as a report" and explicitly warns that one-word answers won't earn full marks. These three markdown cells contain only italic prompts/questions and no actual student-written analysis:
+
+- **Section 1.4 "Model Comparison & Evaluation"** — a bullet list of questions like *"How close are the two models in accuracy?"* with no answers.
+- **Section 2.2 "Kernel Performance Analysis"** — same pattern, no actual commentary written.
+- **Section 2.3 "Grid Search Results"** — same pattern, no actual commentary written.
+
+These sections are worth significant marks. They need real written analysis referencing the plots and numbers produced by the code.
+
+**3. Incomplete/raw internal note left in the stratification commentary**
+
+The markdown cell at the end of Section 1.2 contains:
+
+> "...with only the digit class '1' appearing a few hundred more times. **actually compare to the average**."
+
+The bold text `**actually compare to the average**` is a leftover to-do note. It needs to be replaced with the actual comparison or removed.
+
+**4. Assignment Task 6 is missing as a standalone section**
+
+The assignment description lists a clear separate task:
+
+> **6.** Comment on how the performance of your softmax regression model compares to the scikit-learn logistic regression model.
+
+The notebook doesn't have a Section 1.6 (or equivalent heading) for this. The comparison commentary in Section 1.4 has placeholder text only (see issue 2 above), and even if it were filled in, the assignment spec treats this as a distinct numbered task. A dedicated markdown cell/subsection addressing this specifically should be added.
+
+**5. "Final Conclusion" section is completely empty**
+
+The last cell of the notebook is a `### Final Conclusion` heading with nothing under it. Either write a brief conclusion tying together both parts, or remove the heading entirely so it doesn't look unfinished.
+
+---
+
+### 🟡 Minor — Worth checking
+
+**6. The commented-out image display cell is dead code**
+
+Cell with `# Display the first 10 images and their labels` is entirely commented out. This is fine since `bea1d738` shows individual digit examples anyway — but if a marker runs the notebook they'll see a code cell that does nothing. Consider either deleting it or uncommenting it.
+
+**7. Part 2 section numbering doesn't match assignment task numbering**
+
+The assignment numbers Part 2 tasks as 1–5 (within Part 2). The notebook uses headings like `2.1`, `2.2`, `2.3`, `2.4`. This is a style choice and unlikely to cost marks, but it means Section 2.4 covers both the grid search (assignment task 4) *and* the test evaluation (assignment task 5). Confirm the marker can clearly see both are addressed.
